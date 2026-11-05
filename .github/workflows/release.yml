@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  cli:
+    name: Linux CLI binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
+          cmake --build build --parallel
+          ctest --test-dir build --output-on-failure
+      - name: Package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          name="uav-plan-${version}-linux-x86_64"
+          mkdir -p "dist/${name}/bin"
+          cp build/uav-plan "dist/${name}/bin/"
+          strip "dist/${name}/bin/uav-plan"
+          cp README.md LICENSE CHANGELOG.md "dist/${name}/"
+          tar -C dist -czf "${name}.tar.gz" "${name}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli
+          path: "*.tar.gz"
+
+  python:
+    name: Python sdist and wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+      - name: Check the wheel
+        run: |
+          pip install dist/*.whl pytest
+          python -m pytest -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python
+          path: dist/*
+
+  publish:
+    name: GitHub Release
+    needs: [cli, python]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Checksums and release notes
+        run: |
+          cd assets
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+          cd ..
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then echo "Release ${GITHUB_REF_NAME}" > notes.md; fi
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" assets/* \
+            --title "${GITHUB_REF_NAME}" --notes-file notes.md
