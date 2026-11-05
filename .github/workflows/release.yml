@@ -28,7 +28,7 @@ jobs:
           strip "dist/${name}/bin/uav-plan"
           cp README.md LICENSE CHANGELOG.md "dist/${name}/"
           tar -C dist -czf "${name}.tar.gz" "${name}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cli
           path: "*.tar.gz"
@@ -49,7 +49,7 @@ jobs:
         run: |
           pip install dist/*.whl pytest
           python -m pytest -q
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: python
           path: dist/*
