@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cpp:
+    name: C++ (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc
+            cxx: g++
+          - compiler: clang
+            cxx: clang++
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          -DUAV_WARNINGS_AS_ERRORS=ON
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Example run
+        if: matrix.compiler == 'gcc'
+        run: |
+          mkdir -p examples
+          ./build/uav-plan plan --synthetic 7 --seed 4 --planner thetastar --smooth \
+            --circle-xy 1500,1700,350 --circle-xy 2400,1000,300 --ascii --ascii-width 64 \
+            --out-wpl examples/mission.waypoints --out-plan examples/mission.plan \
+            --out-geojson examples/mission.geojson --out-kml examples/mission.kml \
+            --out-items examples/mission-items.json | tee examples/plan.txt
+          ./build/uav-plan benchmark --maps 20 --size 7 --seed 1 | tee examples/benchmark.md
+          head -n 6 examples/mission.waypoints
+      - name: Upload example output
+        if: matrix.compiler == 'gcc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: examples
+          path: examples/
+
+  sanitizers:
+    name: ASan + UBSan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=g++
+          -DUAV_SANITIZE=ON -DUAV_WARNINGS_AS_ERRORS=ON
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=0
+          UBSAN_OPTIONS: print_stacktrace=1
+
+  python:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Build and install the extension
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[test,plot]"
+      - name: Test
+        run: python -m pytest -v
+      - name: Command line smoke test
+        run: |
+          uav-planner plan --synthetic 6 --seed 2 --smooth --ascii --plot plan.png
+          uav-planner benchmark --maps 3 --size 6 --seed 1
