@@ -89,6 +89,58 @@ TEST(qgc_plan_round_trip) {
   checkSameMission(f.plan.mission, back, 1e-9, 1e-6);
 }
 
+TEST(qgc_plan_altitude_mode_matches_mavlink_frame) {
+  SyntheticParams sp;
+  const Terrain terrain = Terrain::synthetic(sp);
+  const ZoneSet zones;
+  Mission mission;
+  mission.homeLat = 47.0;
+  mission.homeLon = 8.0;
+  mission.homeAlt = 500.0;
+  MissionItem wp;
+  wp.lat = 47.01;
+  wp.lon = 8.01;
+  wp.alt = 550.0;  // MSL, 50 m above the home elevation
+  wp.frame = kMavFrameGlobal;
+  mission.items.push_back(wp);
+  wp.lat = 47.02;
+  mission.items.push_back(wp);
+
+  const json::Value absolute = json::parse(toQgcPlan(mission, terrain, zones));
+  const json::Value& absMission = absolute.at("mission");
+  CHECK(absMission.at("globalPlanAltitudeMode").asNumber() == 2.0);
+  CHECK(absMission.at("items").size() == 2);
+  CHECK(absMission.at("items").at(0).at("frame").asNumber() == static_cast<double>(kMavFrameGlobal));
+  CHECK(absMission.at("items").at(0).at("AltitudeMode").asNumber() == 2.0);
+  CHECK(absMission.at("items").at(1).at("AltitudeMode").asNumber() == 2.0);
+  CHECK_NEAR(absMission.at("items").at(0).at("Altitude").asNumber(), 550.0, 1e-9);
+  CHECK_NEAR(absMission.at("items").at(0).at("params").at(6).asNumber(), 550.0, 1e-9);
+
+  mission.items[0].frame = kMavFrameGlobalRelativeAlt;
+  mission.items[1].frame = kMavFrameGlobalRelativeAlt;
+  mission.items[0].alt = 50.0;
+  mission.items[1].alt = 50.0;
+  const json::Value relative = json::parse(toQgcPlan(mission, terrain, zones));
+  CHECK(relative.at("mission").at("globalPlanAltitudeMode").asNumber() == 1.0);
+  CHECK(relative.at("mission").at("items").at(0).at("frame").asNumber() ==
+        static_cast<double>(kMavFrameGlobalRelativeAlt));
+  CHECK(relative.at("mission").at("items").at(0).at("AltitudeMode").asNumber() == 1.0);
+  CHECK_NEAR(relative.at("mission").at("items").at(0).at("Altitude").asNumber(), 50.0, 1e-9);
+
+  mission.items[1].frame = kMavFrameGlobal;
+  mission.items[1].alt = 550.0;
+  const json::Value mixed = json::parse(toQgcPlan(mission, terrain, zones));
+  CHECK(mixed.at("mission").at("globalPlanAltitudeMode").asNumber() == 0.0);
+  CHECK(mixed.at("mission").at("items").at(0).at("AltitudeMode").asNumber() == 1.0);
+  CHECK(mixed.at("mission").at("items").at(1).at("AltitudeMode").asNumber() == 2.0);
+
+  mission.items[0].frame = 10;  // MAV_FRAME_GLOBAL_TERRAIN_ALT
+  mission.items[1].frame = 10;
+  const json::Value terrainFrame = json::parse(toQgcPlan(mission, terrain, zones));
+  CHECK(terrainFrame.at("mission").at("globalPlanAltitudeMode").asNumber() == 4.0);
+  CHECK(terrainFrame.at("mission").at("items").at(0).at("AltitudeMode").asNumber() == 4.0);
+}
+
 TEST(qgc_plan_rejects_other_documents) {
   CHECK_THROWS(parseQgcPlan("{}"));
   CHECK_THROWS(parseQgcPlan(R"({"fileType": "Other"})"));

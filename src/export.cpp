@@ -78,6 +78,42 @@ json::Value lonLatAlt(double lat, double lon, double alt) {
   return c;
 }
 
+// QGroundControl .plan AltitudeMode (QGroundControlQmlGlobal::AltMode, stable since 4.2).
+// Mode 1 is metres above home. Writing it for an MSL altitude makes QGC add the home
+// elevation a second time. Absolute AMSL is 2; terrain frame is 4; mixed plans use 0.
+constexpr int kQgcAltMixed = 0;
+constexpr int kQgcAltRelative = 1;
+constexpr int kQgcAltAbsolute = 2;
+constexpr int kQgcAltTerrain = 4;
+constexpr int kMavFrameGlobalInt = 5;
+constexpr int kMavFrameGlobalRelativeAltInt = 6;
+constexpr int kMavFrameGlobalTerrainAlt = 10;
+constexpr int kMavFrameGlobalTerrainAltInt = 11;
+
+[[nodiscard]] int qgcAltitudeMode(int frame) {
+  switch (frame) {
+    case kMavFrameGlobalRelativeAlt:
+    case kMavFrameGlobalRelativeAltInt:
+      return kQgcAltRelative;
+    case kMavFrameGlobalTerrainAlt:
+    case kMavFrameGlobalTerrainAltInt:
+      return kQgcAltTerrain;
+    case kMavFrameGlobal:
+    case kMavFrameGlobalInt:
+    default:
+      return kQgcAltAbsolute;
+  }
+}
+
+[[nodiscard]] int qgcGlobalAltitudeMode(const Mission& mission) {
+  if (mission.items.empty()) return kQgcAltAbsolute;
+  const int mode = qgcAltitudeMode(mission.items.front().frame);
+  for (const MissionItem& it : mission.items) {
+    if (qgcAltitudeMode(it.frame) != mode) return kQgcAltMixed;
+  }
+  return mode;
+}
+
 }  // namespace
 
 std::string toWpl(const Mission& mission) {
@@ -188,7 +224,7 @@ std::string toQgcPlan(const Mission& mission, const Terrain& terrain, const Zone
   Value mis = Value::makeObject();
   mis.set("cruiseSpeed", num(15));
   mis.set("firmwareType", num(3));
-  mis.set("globalPlanAltitudeMode", num(1));
+  mis.set("globalPlanAltitudeMode", num(qgcGlobalAltitudeMode(mission)));
   mis.set("hoverSpeed", num(5));
   Value items = Value::makeArray();
   for (std::size_t i = 0; i < mission.items.size(); ++i) {
@@ -196,7 +232,7 @@ std::string toQgcPlan(const Mission& mission, const Terrain& terrain, const Zone
     Value item = Value::makeObject();
     item.set("AMSLAltAboveTerrain", Value::makeNull());
     item.set("Altitude", num(it.alt));
-    item.set("AltitudeMode", num(1));
+    item.set("AltitudeMode", num(qgcAltitudeMode(it.frame)));
     item.set("autoContinue", Value::makeBool(it.autocontinue));
     item.set("command", num(it.command));
     item.set("doJumpId", num(static_cast<double>(i + 1)));
