@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- QGroundControl `.plan` export tags MSL waypoints (global frame) as absolute altitude mode 2. Mode 1 is height above home, so QGC was adding the home elevation on top of the planned MSL altitude. Relative-frame items stay mode 1, terrain-frame items use mode 4, and a mix of frames sets the plan-wide mode to mixed (0).
+
 ## [1.0.0] - 2026-11-05
 
 ### Added
